@@ -70,18 +70,29 @@ Colori getColor(Ray& ray)
 	return Colori(value, value, 255);
 }
 
-bool isHitSphere(Sphere& sphere, Ray& ray)
+HitResult isHitSphere(Sphere& sphere, Ray& ray)
 {
+	HitResult result = { 0.0f, Vector3f::Zero(), false };
+
 	const Vector3f& vectorA = ray.origin();
 	const Vector3f& vectorB = ray.direction();
 	const Vector3f& vectorC = sphere.center;
 
 	float a = vectorB.dot(vectorB);
-	float b = 2 * vectorB.dot(vectorA - vectorC);
-	Vector3f vecDiffBetweenAAndC = vectorA - vectorC;
-	float c = vecDiffBetweenAAndC.dot(vecDiffBetweenAAndC) - sphere.radius * sphere.radius;
+	Vector3f vectorAC= vectorA - vectorC;
+	float b = 2 * vectorB.dot(vectorAC);
+	float c = vectorAC.dot(vectorAC) - sphere.radius * sphere.radius;
 
-	return (b * b - 4 * a * c) >= 0;
+	float discriminant = b * b - 4 * a * c;
+
+	if (discriminant > 0.0f)
+	{
+		result.t = (-b + std::sqrt(discriminant)) / (2.0f * a);
+		result.hitPostion = ray.pointAt(discriminant);
+		result.isHit = true;
+	}
+
+	return result;
 }
 
 namespace rm
@@ -209,9 +220,14 @@ int main()
 
 			Colori color = getColor(ray);
 
-			if (isHitSphere(sphere, ray))
+			HitResult result = isHitSphere(sphere, ray);
+
+			if (result.isHit)
 			{
-				color = Colori(255, 0, 0);
+				Vector3f normal = result.hitPostion - sphere.center;
+				normal.normalize();
+				float blend = 1.0f - (1.0f + ray.direction().dot(normal)) / 2.0f;
+				color = Colori(int(255.0f * blend), 0, 0);
 			}
 			
 			ppmFile << color.x() << " " << color.y() << " " << color.z() << "\n";
