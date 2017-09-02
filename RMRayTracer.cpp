@@ -6,6 +6,7 @@
 #include <fstream>
 #include <algorithm>
 #include <vector>
+#include <random>
 #include <Eigen/Dense>
 #include <Eigen/Geometry>
 
@@ -14,180 +15,235 @@ using namespace std;
 
 using Ray = ParametrizedLine<float, 3>;
 using Colori = Vector3i;
+using Colorf = Vector3f;
 
 namespace rm
 {
-	class IHitableObject;
-}
-
-using HitableObjectList = std::vector<rm::IHitableObject>;
-
-struct Sphere
-{
-	Vector3f center;
-	float radius;
-};
-
-struct HitResult
-{
-	float t;
-	Vector3f hitPostion;
-	bool isHit;
-};
-
-class Camera
-{
-public:
-	Camera(const Vector2i& lScreenSize, const Vector2f& lScreenVirtualSize, const Vector3f& lCameraPosition, const Vector3f& lLeftRightCorner)
-		: screenSize(lScreenSize)
-		, screenVirtualSize(lScreenVirtualSize)
-		, screenVirtualHalfSize(lScreenVirtualSize / 2.0f)
-		, cameraPosition(lCameraPosition)
-		, leftRightCorner(lLeftRightCorner)
+	class HitResult
 	{
+	public:
+		HitResult()
+			: t(0.0f)
+			, hitPostion(Vector3f::Zero())
+			, isHit(false)
+		{}
 
-	}
+		void Reset()
+		{
+			t = 0.0f;
+			hitPostion = Vector3f::Zero();
+			isHit = false;
+		}
 
-	const Vector2i& getScreenSize() const { return screenSize; }
-	const Vector2f& getScreenVirtualSize() const { return screenVirtualSize; }
-	const Vector2f& getScreenVirtualHalfSize() const { return screenVirtualHalfSize; }
-	const Vector3f& getCameraPosition() const { return cameraPosition; }
-	const Vector3f& getLeftRightCorner() const { return leftRightCorner; }
+		float t;
+		Vector3f hitPostion;
+		bool isHit;
+	};
 
-private:
-	Vector2i screenSize;
-	Vector2f screenVirtualSize;
-	Vector2f screenVirtualHalfSize;
-	Vector3f cameraPosition;
-	Vector3f leftRightCorner;
-};
-
-Colori getColor(Ray& ray)
-{
-	float sqrt = std::sqrt(ray.direction().x() * ray.direction().x() + ray.direction().y() * ray.direction().y());
-	float lerpValue = std::min(1.0f, sqrt);
-	int value = (int)(255.0f * (1.0f - lerpValue));
-	return Colori(value, value, 255);
-}
-
-HitResult isHitSphere(Sphere& sphere, Ray& ray)
-{
-	HitResult result = { 0.0f, Vector3f::Zero(), false };
-
-	const Vector3f& vectorA = ray.origin();
-	const Vector3f& vectorB = ray.direction();
-	const Vector3f& vectorC = sphere.center;
-
-	float a = vectorB.dot(vectorB);
-	Vector3f vectorAC= vectorA - vectorC;
-	float b = 2 * vectorB.dot(vectorAC);
-	float c = vectorAC.dot(vectorAC) - sphere.radius * sphere.radius;
-
-	float discriminant = b * b - 4 * a * c;
-
-	if (discriminant > 0.0f)
+	class Camera
 	{
-		result.t = (-b + std::sqrt(discriminant)) / (2.0f * a);
-		result.hitPostion = ray.pointAt(discriminant);
-		result.isHit = true;
-	}
+	public:
+		Camera(const Vector2i& lScreenSize, const Vector2f& lScreenVirtualSize, const Vector3f& lCameraPosition, const Vector3f& lLeftRightCorner, int lSampleCount)
+			: screenSize(lScreenSize)
+			, screenVirtualSize(lScreenVirtualSize)
+			, screenVirtualHalfSize(lScreenVirtualSize / 2.0f)
+			, cameraPosition(lCameraPosition)
+			, leftRightCorner(lLeftRightCorner)
+			, sampleCount(lSampleCount)
+		{
 
-	return result;
-}
+		}
 
-namespace rm
-{
+		const Vector2i& GetScreenSize() const { return screenSize; }
+		const Vector2f& GetScreenVirtualSize() const { return screenVirtualSize; }
+		const Vector2f& GetScreenVirtualHalfSize() const { return screenVirtualHalfSize; }
+		const Vector3f& GetCameraPosition() const { return cameraPosition; }
+		const Vector3f& GetLeftRightCorner() const { return leftRightCorner; }
+		int GetSampleCount() const { return sampleCount; }
+
+	private:
+		Vector2i screenSize;
+		Vector2f screenVirtualSize;
+		Vector2f screenVirtualHalfSize;
+		Vector3f cameraPosition;
+		Vector3f leftRightCorner;
+		int sampleCount;
+	};
+
 	class IHitableObject
 	{
 	public:
-		virtual HitResult IsHit(const Ray& ray) const = 0;
+		virtual bool		IsHit(const Ray& ray, float minT, float maxT, HitResult& hitResult) const = 0;
+		virtual Vector3f	GetNormal(const Vector3f& surfacePosition) const = 0;
+		virtual Colorf		GetColor() const = 0;
 	};
 
 	class Sphere : public IHitableObject
 	{
 	public:
-		Sphere(const Vector3f& lCenter, float lRadius)
+		Sphere(const Vector3f& lCenter, float lRadius, const Colorf lColor)
 			: center(lCenter)
 			, radius(lRadius)
+			, color(lColor)
 		{}
 
-		virtual HitResult IsHit(const Ray& ray, float maxT, float minT) const
+		virtual bool IsHit(const Ray& ray, float minT, float maxT, HitResult& hitResult) const
 		{
-			HitResult result = { 0.0f, Vector3f::Zero(), false };
+			hitResult.Reset();
 
 			const Vector3f& vectorA = ray.origin();
 			const Vector3f& vectorB = ray.direction();
 			const Vector3f& vectorC = center;
 
 			float a = vectorB.dot(vectorB);
-			float b = 2 * vectorB.dot(vectorA - vectorC);
-			Vector3f vecDiffBetweenAAndC = vectorA - vectorC;
-			float c = vecDiffBetweenAAndC.dot(vecDiffBetweenAAndC) - radius * radius;
+			Vector3f vectorAC = vectorA - vectorC;
+			float b = 2 * vectorB.dot(vectorAC);
+			float c = vectorAC.dot(vectorAC) - radius * radius;
 
-			float condition = b * b - 4 * a * c;
-			if (condition > 0.0f)
+			float discriminant = b * b - 4 * a * c;
+
+			if (discriminant > 0.0f)
 			{
-				float t = (-b - std::sqrt(condition)) / (2 * a);
-				if (t < maxT && t >= minT)
+				float t1 = (-b + std::sqrt(discriminant)) / (2.0f * a);
+				float t2 = (-b - std::sqrt(discriminant)) / (2.0f * a);
+				
+				float t = std::min(t1, t2);
+
+				if (t >= minT && t < maxT)
 				{
-					result.t = t;
-					//result.hitPostion
-					result.isHit = true;
-				}
-				else
-				{
-					t = (-b + std::sqrt(condition)) / (2 * a);
-					if (t < maxT && t >= minT)
-					{
-						result.t = t;
-						result.isHit = true;
-					}
+					hitResult.t = t;
+					hitResult.hitPostion = ray.pointAt(t);
+					hitResult.isHit = true;
 				}
 			}
 
-			return result;
+			return hitResult.isHit;
+		}
+
+		virtual Vector3f GetNormal(const Vector3f& surfacePosition) const
+		{
+			Vector3f normal = surfacePosition - center;
+			normal.normalize();
+			return normal;
+		}
+
+		virtual Colorf GetColor() const
+		{
+			return color;
 		}
 
 	private:
 		Vector3f center;
 		float radius;
+		Colorf color;
 	};
-}
 
-void RayTrace(ofstream& fileHandle, const Camera& cam, const HitableObjectList& list)
-{
-	/*for (int y = cam.getScreenSize.y(); y >= 0; --y)
+	class Scene
 	{
-		for (int x = 0; x < cam.getScreenSize.x(); ++x)
+	public:
+		Scene()
 		{
-			Vector3f offset((float)x / (float)cam.getScreenSize.x() * cam.getScreenVirtualSize.x(),
-							(float)y / (float)cam.getScreenSize.y() * cam.getScreenVirtualSize.y(), 0.0f);
-			offset = offset + cam.getLeftRightCorner;
-			offset.normalize();
-			Ray ray(cam.getCameraPosition(), offset);
-
-			Colori color = getColor(ray);
-
-			for (size_t i = 0; i < list.size(); ++i)
-			{
-				IHitableObject& obj = list[i];
-
-				HitResult result = obj.IsHit(ray);
-				if (result.isHit)
-				{
-					color = Colori(255, 0, 0);
-				}
-			}
-
-			if (isHitSphere(sphere, ray))
-			{
-				color = Colori(255, 0, 0);
-			}
-
-			fileHandle << color.x() << " " << color.y() << " " << color.z() << "\n";
+			InitScene();
 		}
-	}*/
-}
+
+		~Scene()
+		{
+			DestoryScene();
+		}
+
+		void AddHitableObject(IHitableObject* obj)
+		{
+			objectList.push_back(obj);
+		}
+
+		void RayTrace(ofstream& fileHandle, const Camera& cam);
+
+	protected:
+		void InitScene()
+		{
+
+		}
+
+		void DestoryScene()
+		{
+			for each (auto obj in objectList)
+			{
+				delete obj;
+			}
+
+			objectList.clear();
+		}
+
+	private:
+		Colori GetBackgroundColor(Ray& ray)
+		{
+			float sqrt = std::sqrt(ray.direction().x() * ray.direction().x() + ray.direction().y() * ray.direction().y());
+			float lerpValue = std::min(1.0f, sqrt);
+			int value = (int)(255.0f * (1.0f - lerpValue));
+			return Colori(value, value, 255);
+		}
+
+		using HitableObjectList = std::vector<rm::IHitableObject*>;
+
+		HitableObjectList objectList;
+	};
+
+	void Scene::RayTrace(ofstream& fileHandle, const Camera& cam)
+	{
+		std::random_device rd; 
+		std::mt19937 gen(rd());
+		std::uniform_real_distribution<float> dis(0.0f, 1.0f);
+
+		for (int y = cam.GetScreenSize().y(); y >= 0; --y)
+		{
+			for (int x = 0; x < cam.GetScreenSize().x(); ++x)
+			{
+				Colori color(0, 0, 0);
+
+				for (int index = 0; index < cam.GetSampleCount(); ++index)
+				{
+					float sampleX = float(x) + dis(gen);
+					float sampleY = float(y) + dis(gen);
+					
+					Vector3f offset(sampleX / (float)cam.GetScreenSize().x() * cam.GetScreenVirtualSize().x(),
+						sampleY / (float)cam.GetScreenSize().y() * cam.GetScreenVirtualSize().y(), 0.0f);
+					offset = offset + cam.GetLeftRightCorner();
+					offset.normalize();
+
+					Ray ray(cam.GetCameraPosition(), offset);
+
+					HitResult hitResult;
+					float minT = 0.0f;
+					float maxT = FLT_MAX;
+					bool atLeastHitOnce = false;
+
+					for each (auto obj in objectList)
+					{
+						if (obj->IsHit(ray, minT, maxT, hitResult))
+						{
+							atLeastHitOnce = true;
+							maxT = hitResult.t;
+							Vector3f normal = obj->GetNormal(hitResult.hitPostion);
+							float blend = 1.0f - (1.0f + ray.direction().dot(normal)) / 2.0f;
+							Colorf objColor = blend * 256.0f * obj->GetColor();
+							color += Colori((int)objColor.x(), (int)objColor.y(), (int)objColor.z());
+						}
+					}
+
+					if (!atLeastHitOnce)
+					{
+						color += GetBackgroundColor(ray);
+					}
+				}
+
+				color /= cam.GetSampleCount();
+
+				fileHandle << color.x() << " " << color.y() << " " << color.z() << "\n";
+			}
+		}
+	} // end of Scene::RayTrace
+
+} // end of namespace
 
 int main()
 {
@@ -200,40 +256,18 @@ int main()
 	Vector3f cameraPosition(0.0f, 0.0f, 1.0f);
 	Vector3f leftRightCorner(-screenVirtualHalfSize.x(), -screenVirtualHalfSize.y(), -1.0f);
 
-	Camera cam(screenSize, screenVirtualSize, cameraPosition, leftRightCorner);
+	rm::Camera cam(screenSize, screenVirtualSize, cameraPosition, leftRightCorner, 8);
 
 	ppmFile << "P3\n" << screenSize.x() << " " << screenSize.y() << "\n255\n";
 
-	Sphere sphere{ Vector3f(0.0, 0.0, -1.0), 1.0f };
+	rm::Sphere* sphere1 = new rm::Sphere { Vector3f(0.0f, 0.0f, -1.0f), 0.8f, Colorf(1.0f, 0.0f, 0.0f) };
+	rm::Sphere* sphere2 = new rm::Sphere { Vector3f(0.0f, 0.0f, -2.5f), 1.8f, Colorf(0.0f, 0.0f, 1.0f) };
 
-	for (int y = screenSize.y(); y >= 0; --y)
-	{
-		for (int x = 0; x < screenSize.x(); ++x)
-		{
-			Vector3f offset((float)x / (float)screenSize.x() * screenVirtualSize.x(), 
-							(float)y / (float)screenSize.y() * screenVirtualSize.y(), 
-							0.0f);
-			offset = offset + leftRightCorner;
-			offset = offset - cameraPosition;
-			offset.normalize();
-			Ray ray(cameraPosition, offset);
+	rm::Scene scene;
+	scene.AddHitableObject(sphere1);
+	scene.AddHitableObject(sphere2);
+	scene.RayTrace(ppmFile, cam);
 
-			Colori color = getColor(ray);
-
-			HitResult result = isHitSphere(sphere, ray);
-
-			if (result.isHit)
-			{
-				Vector3f normal = result.hitPostion - sphere.center;
-				normal.normalize();
-				float blend = 1.0f - (1.0f + ray.direction().dot(normal)) / 2.0f;
-				color = Colori(int(255.0f * blend), 0, 0);
-			}
-			
-			ppmFile << color.x() << " " << color.y() << " " << color.z() << "\n";
-		}
-	}
-	
 	ppmFile.close();
 
     return 0;
