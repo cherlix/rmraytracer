@@ -31,10 +31,11 @@
 *.out
 *.app
 
-# VS folder
+# VS folders
 /.vs
 /ipch
 /Debug/**
+/x64
 
 # VS files
 *.VC.db
