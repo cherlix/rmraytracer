@@ -30,3 +30,19 @@
 *.exe
 *.out
 *.app
+
+# VS folder
+/.vs
+/ipch
+/Debug/**
+
+# VS files
+*.VC.db
+*.opendb
+*.filters
+
+# ppm file
+*.ppm
+
+# External folder
+/External/**
